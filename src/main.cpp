@@ -136,6 +136,7 @@ void tarefaWifi(void *param){
     else{
       estadoAtual = ESTADO_ERRO;
     }
+
     vTaskDelay(pdMS_TO_TICKS(5000));
   }  
 }
