@@ -13,13 +13,13 @@
 #include <PubSubClient.h>
 #include <DHT.h>
 #include <WiFi.h>
+#include <ESP32Servo.h>
 
 
 //PINAGEM
 #define led_sala    2
 #define led_cozinha 4
 #define led_quarto  5
-#define motor_varal 16
 #define buzzer      18
 
 #define pir_pin     19
@@ -27,6 +27,10 @@
 #define dht_pin     15
 
 #define DHT_TIPO    DHT22
+
+#define PINO_SERVO_VARAL 25
+#define VARAL_RECOLHIDO  0
+#define VARAL_ESTENDIDO  90
 
 // WIFI E BROKER MQTT
 const char* ssid = "Wokwi-GUEST";
@@ -37,7 +41,8 @@ const char* brokerMQTT = "broker.hivemq.com";
 WiFiClient clienteWiFi;
 PubSubClient clienteMQTT(clienteWiFi);
 
-DHT dht(dht_pin,DHT_TIPO); // config do sensor de umidade e temperatura
+DHT dht(dht_pin, DHT_TIPO);
+Servo servoVaral;
 
 //DEFINÇÃO DOS ESTADOS  DO SISTEMA
 typedef enum{
@@ -50,13 +55,25 @@ typedef enum{
 
 EstadoSistema estadoAtual = ESTADO_INICIANDO;
 
-//EVENTOS
-#define EVT_WIFI_OK     (1 << 0)
-#define EVT_MQTT_OK     (1 << 1)
-#define EVT_MOVIMENTO   (1 << 2)
-#define EVT_GAS         (1 << 3)
+// ESTADOS DO VARAL
+typedef enum {
+  VARAL_MODO_AUTOMATICO,
+  VARAL_MODO_MANUAL,
+  VARAL_ABERTO,
+  VARAL_FECHADO
+} EstadoVaral_t;
 
-//REFERENCIAS PARA ACESSO A INTERNO
+EstadoVaral_t estadoVaral = VARAL_FECHADO;
+EstadoVaral_t modoVaral   = VARAL_MODO_AUTOMATICO;
+
+// EVENTOS
+#define EVT_WIFI_OK          (1 << 0)
+#define EVT_MQTT_OK          (1 << 1)
+#define EVT_MOVIMENTO        (1 << 2)
+#define EVT_GAS              (1 << 3)
+#define EVT_ATUALIZAR_VARAL  (1 << 4)
+
+// HANDLES DAS TASKS
 TaskHandle_t tarefaEstadoHandle;
 TaskHandle_t tarefaWifiHandle;
 TaskHandle_t tarefaMQTTHandle;
@@ -126,13 +143,19 @@ void tarefaWifi(void *param){
 //TASK MQTT
 void callbackMQTT(char* topico, byte* payload, unsigned int tamanho){
   String mensagem;
-  for (int i = 0; i < tamanho; i++)
-  {
+
+  for (unsigned int i = 0; i < tamanho; i++) {
     mensagem += (char)payload[i];
   }
-  if(String(topico) == "casa/luz/sala") digitalWrite(led_sala, mensagem =="ON");
-  if(String(topico) == "casa/luz,cozinha") digitalWrite(led_cozinha, mensagem =="ON");
-  if(String(topico) == "casa/luz/quarto") digitalWrite(led_quarto, mensagem=="ON");  
+
+  if (String(topico) == "casa/luz/sala")
+    digitalWrite(led_sala, mensagem == "ON");
+
+  if (String(topico) == "casa/luz/cozinha")
+    digitalWrite(led_cozinha, mensagem == "ON");
+
+  if (String(topico) == "casa/luz/quarto")
+    digitalWrite(led_quarto, mensagem == "ON");
 }
 
 void tarefaMQTT(void *param){
@@ -160,14 +183,16 @@ void tarefaClima(void *param){
     float umidade = dht.readHumidity();
     float temperatura = dht.readTemperature();
 
-    if(umidade < 60){
-      digitalWrite(motor_varal,HIGH);
-    } else{
-      digitalWrite(motor_varal,LOW);
+    if (umidade < 60) {
+      servoVaral.write(VARAL_ESTENDIDO);
+      estadoVaral = VARAL_ABERTO;
+    } else {
+      servoVaral.write(VARAL_RECOLHIDO);
+      estadoVaral = VARAL_FECHADO;
     }
 
     char payload[50];
-    sprintf(payload,"{\"temp\": %.1f, \"umi\":%.1f}", temperatura, umidade);
+    sprintf(payload, "{\"temp\": %.1f, \"umi\": %.1f}", temperatura, umidade);
     clienteMQTT.publish("casa/clima", payload);
 
     vTaskDelay(pdMS_TO_TICKS(5000));
@@ -206,10 +231,12 @@ void setup(){
   pinMode(led_sala, OUTPUT);
   pinMode(led_cozinha, OUTPUT);
   pinMode(led_quarto, OUTPUT);
-  pinMode(motor_varal, OUTPUT);
   pinMode(buzzer, OUTPUT);
   pinMode(pir_pin, INPUT);
   pinMode(mq2_pin, INPUT);
+
+  servoVaral.attach(PINO_SERVO_VARAL);
+  servoVaral.write(VARAL_RECOLHIDO);
 
   dht.begin();
 
