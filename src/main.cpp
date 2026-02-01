@@ -1,3 +1,14 @@
+/*
+  Projeto : Automação Residencial com ESP32
+  Autor   : Eng. Wilhan Almeida
+  Data    : 30/01/2026
+
+  Descrição:
+  Sistema de automação residencial utilizando ESP32,
+  FreeRTOS e MQTT para controle de iluminação, sensores
+  e atuadores simulados.
+*/
+
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <DHT.h>
